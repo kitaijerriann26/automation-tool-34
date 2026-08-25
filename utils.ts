@@ -1,80 +1,61 @@
-export function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Utility for retrying network operations with exponential backoff
+// Suitable for flaky network calls in automation-tool-34
+
+interface RetryOptions {
+  /** Maximum number of retry attempts */
+  maxRetries: number;
+  /** Initial delay in milliseconds */
+  baseDelay: number;
+  /** Maximum delay to cap at */
+  maxDelay: number;
+  /** Function to determine if error is retryable */
+  isRetryable: (error: unknown) => boolean;
 }
 
-export async function retryOperation<T>(
-  fn: () => Promise<T>,
-  maxRetries: number = 3,
-  retryDelay: number = 500
+function calculateDelay(attempt: number, baseDelay: number, maxDelay: number): number {
+  const exponentialDelay = baseDelay * Math.pow(2, attempt - 1);
+  return Math.min(exponentialDelay, maxDelay);
+}
+
+const defaultIsRetryable = (error: unknown): boolean => {
+  if (error instanceof Error) {
+    // Retry on common network issues
+    const msg = error.message.toLowerCase();
+    return msg.includes('timeout') ||
+           msg.includes('network') ||
+           msg.includes('econnreset') ||
+           msg.includes('fetch failed');
+  }
+  return true;
+};
+
+export async function withNetworkRetry<T>(
+  operation: () => Promise<T>,
+  options: Partial<RetryOptions> = {}
 ): Promise<T> {
-  for (let i = 0; i < maxRetries; i++) {
+  const finalOptions: RetryOptions = {
+    maxRetries: 3,
+    baseDelay: 1000,
+    maxDelay: 30000,
+    isRetryable: defaultIsRetryable,
+    ...options
+  };
+
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= finalOptions.maxRetries; attempt++) {
     try {
-      return await fn();
+      return await operation();
     } catch (error) {
-      if (i === maxRetries - 1) {
+      lastError = error;
+      if (attempt === finalOptions.maxRetries || !finalOptions.isRetryable(error)) {
         throw error;
       }
-      await delay(retryDelay);
+
+      const delay = calculateDelay(attempt, finalOptions.baseDelay, finalOptions.maxDelay);
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
-  throw new Error('Retry failed');
-}
 
-export function parseJsonSafely<T>(jsonString: string, defaultValue: T): T {
-  try {
-    return JSON.parse(jsonString) as T;
-  } catch {
-    return defaultValue;
-  }
-}
-
-export function generateId(): string {
-  return Math.random().toString(36).substring(2, 15);
-}
-
-export function validateConfig(config: Record<string, any>): boolean {
-  return config && typeof config === 'object' && !Array.isArray(config);
-}
-
-export function processBatch<T, R>(
-  items: T[],
-  processor: (item: T) => R,
-  batchSize: number = 10
-): R[] {
-  const results: R[] = [];
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const batchResults = batch.map(processor);
-    results.push(...batchResults);
-  }
-  return results;
-}
-
-export function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) {
-    return `${hours}h ${minutes % 60}m`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  } else {
-    return `${seconds}s`;
-  }
-}
-
-// Helper for merging config objects after reorganization
-export function mergeObjects<T extends object>(target: T, source: Partial<T>): T {
-  const result = { ...target };
-  for (const key in source) {
-    if (Object.prototype.hasOwnProperty.call(source, key)) {
-      const value = source[key];
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        result[key] = mergeObjects(result[key] || ({} as any), value as any);
-      } else {
-        result[key] = value as any;
-      }
-    }
-  }
-  return result;
+  throw lastError as Error;
 }
