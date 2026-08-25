@@ -1,45 +1,71 @@
-export interface Config {
-  endpoint: string;
-  timeout: number;
-  retries: number;
-  verbose: boolean;
+// Helper utilities for automation-tool-34
+// Provides reusable functions for delays, retries, and logging
+
+export interface TaskConfig {
+  maxRetries: number;
+  timeoutMs: number;
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
 
-const defaults: Config = {
-  endpoint: 'http://localhost:3000',
-  timeout: 5000,
-  retries: 3,
-  verbose: false,
-};
-
-export function loadConfig(userConfig: Partial<Config> = {}): Config {
-  const config: Config = {
-    ...defaults,
-    ...userConfig,
-  };
-
-  // Ensure positive values for timeout and retries
-  if (config.timeout <= 0) {
-    config.timeout = defaults.timeout;
-  }
-
-  if (config.retries < 0) {
-    config.retries = defaults.retries;
-  }
-
-  return config;
+// Creates a promise that resolves after the given delay
+export function createDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
-export function createCustomLoader(customDefaults: Partial<Config> = {}) {
-  const mergedDefaults = { ...defaults, ...customDefaults };
-  return (userConfig: Partial<Config> = {}): Config => {
-    const config = { ...mergedDefaults, ...userConfig };
-    if (config.timeout <= 0) {
-      config.timeout = mergedDefaults.timeout;
+// Retries an async operation with configurable max attempts
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3
+): Promise<T> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < maxRetries) {
+        await createDelay(1000 * (attempt + 1));
+      }
     }
-    if (config.retries < 0) {
-      config.retries = mergedDefaults.retries;
-    }
-    return config;
-  };
+  }
+  throw lastError || new Error('Operation failed after retries');
+}
+
+// Formats log entry with current timestamp
+export function formatLogMessage(message: string, level: string): string {
+  const timestamp = new Date().toISOString();
+  return `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+}
+
+// Outputs formatted message to console
+export function log(message: string, level: TaskConfig['logLevel'] = 'info'): void {
+  const formatted = formatLogMessage(message, level);
+  if (level === 'error' || level === 'warn') {
+    console.error(formatted);
+  } else {
+    console.log(formatted);
+  }
+}
+
+// Provides methods to execute tasks with configured retry logic
+export class AutomationHelpers {
+  private config: TaskConfig;
+
+  constructor(config: TaskConfig) {
+    this.config = config;
+  }
+
+  async executeWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+    return withRetry(fn, this.config.maxRetries);
+  }
+
+  getTimeout(): number {
+    return this.config.timeoutMs;
+  }
+
+  logInfo(message: string): void {
+    log(message, 'info');
+  }
 }
