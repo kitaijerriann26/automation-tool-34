@@ -1,71 +1,57 @@
-// Helper utilities for automation-tool-34
-// Provides reusable functions for delays, retries, and logging
+/**
+ * Core performance optimization helpers for automation-tool-34.
+ * Provides memoization and batch processing for heavy operations.
+ */
 
-export interface TaskConfig {
-  maxRetries: number;
-  timeoutMs: number;
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
+export interface CacheItem<T> {
+  value: T;
+  timestamp: number;
 }
 
-// Creates a promise that resolves after the given delay
-export function createDelay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+/**
+ * Memoizes synchronous function results with time-to-live (TTL) expiration.
+ */
+export function memoizeWithTTL<TArgs extends unknown[], TReturn>(
+  fn: (...args: TArgs) => TReturn,
+  ttlMs: number = 5000
+): (...args: TArgs) => TReturn {
+  const cache = new Map<string, CacheItem<TReturn>>();
+
+  return (...args: TArgs): TReturn => {
+    const key = JSON.stringify(args);
+    const now = Date.now();
+    const cached = cache.get(key);
+
+    if (cached && now - cached.timestamp < ttlMs) {
+      return cached.value;
+    }
+
+    const result = fn(...args);
+    cache.set(key, { value: result, timestamp: now });
+    return result;
+  };
 }
 
-// Retries an async operation with configurable max attempts
-export async function withRetry<T>(
-  operation: () => Promise<T>,
-  maxRetries: number = 3
-): Promise<T> {
-  let lastError: Error | undefined;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      if (attempt < maxRetries) {
-        await createDelay(1000 * (attempt + 1));
-      }
+/**
+ * Processes items in optimized batches to prevent event loop starvation.
+ */
+export async function processInBatches<T, R>(
+  items: T[],
+  processor: (item: T) => Promise<R>,
+  batchSize: number = 50
+): Promise<R[]> {
+  const results: R[] = [];
+  
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(processor));
+    results.push(...batchResults);
+    
+    // Yield control back to the event loop between large batches
+    if (i + batchSize < items.length) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
   }
-  throw lastError || new Error('Operation failed after retries');
-}
 
-// Formats log entry with current timestamp
-export function formatLogMessage(message: string, level: string): string {
-  const timestamp = new Date().toISOString();
-  return `[${timestamp}] [${level.toUpperCase()}] ${message}`;
-}
-
-// Outputs formatted message to console
-export function log(message: string, level: TaskConfig['logLevel'] = 'info'): void {
-  const formatted = formatLogMessage(message, level);
-  if (level === 'error' || level === 'warn') {
-    console.error(formatted);
-  } else {
-    console.log(formatted);
-  }
-}
-
-// Provides methods to execute tasks with configured retry logic
-export class AutomationHelpers {
-  private config: TaskConfig;
-
-  constructor(config: TaskConfig) {
-    this.config = config;
-  }
-
-  async executeWithRetry<T>(fn: () => Promise<T>): Promise<T> {
-    return withRetry(fn, this.config.maxRetries);
-  }
-
-  getTimeout(): number {
-    return this.config.timeoutMs;
-  }
-
-  logInfo(message: string): void {
-    log(message, 'info');
-  }
+  return results;
 }
