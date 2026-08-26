@@ -1,6 +1,6 @@
 /**
  * Core performance optimization helpers for automation-tool-34.
- * Provides memoization and batch processing for heavy operations.
+ * Provides memoization and batch processing utilities.
  */
 
 export interface CacheItem<T> {
@@ -9,15 +9,15 @@ export interface CacheItem<T> {
 }
 
 /**
- * Memoizes synchronous function results with time-to-live (TTL) expiration.
+ * Memoizes synchronous functions to prevent redundant heavy computations.
  */
-export function memoizeWithTTL<TArgs extends unknown[], TReturn>(
-  fn: (...args: TArgs) => TReturn,
-  ttlMs: number = 5000
-): (...args: TArgs) => TReturn {
-  const cache = new Map<string, CacheItem<TReturn>>();
+export function memoize<TArgs extends readonly unknown[], TResult>(
+  fn: (...args: TArgs) => TResult,
+  ttlMs: number = 60000
+): (...args: TArgs) => TResult {
+  const cache = new Map<string, CacheItem<TResult>>();
 
-  return (...args: TArgs): TReturn => {
+  return (...args: TArgs): TResult => {
     const key = JSON.stringify(args);
     const now = Date.now();
     const cached = cache.get(key);
@@ -33,12 +33,12 @@ export function memoizeWithTTL<TArgs extends unknown[], TReturn>(
 }
 
 /**
- * Processes items in optimized batches to prevent event loop starvation.
+ * Processes an array of items in optimized concurrency batches.
  */
-export async function processInBatches<T, R>(
+export async function batchProcess<T, R>(
   items: T[],
   processor: (item: T) => Promise<R>,
-  batchSize: number = 50
+  batchSize: number = 10
 ): Promise<R[]> {
   const results: R[] = [];
   
@@ -46,11 +46,6 @@ export async function processInBatches<T, R>(
     const batch = items.slice(i, i + batchSize);
     const batchResults = await Promise.all(batch.map(processor));
     results.push(...batchResults);
-    
-    // Yield control back to the event loop between large batches
-    if (i + batchSize < items.length) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
   }
 
   return results;
