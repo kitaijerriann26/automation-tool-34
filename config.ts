@@ -1,29 +1,45 @@
-import { createLogger, format, transports } from 'winston';
-import 'winston-daily-rotate-file';
+import * as fs from 'fs';
+import * as path from 'path';
 
-const transport = new (transports.DailyRotateFile)({
-    filename: 'application-%DATE%.log',
-    dirname: 'logs',
-    datePattern: 'YYYY-MM-DD',
-    zippedArchive: true,
-    maxSize: '20m',
-    maxFiles: '14d',
-    format: format.combine(
-        format.timestamp(),
-        format.json()
-    )
-});
+export interface AppConfig {
+  readonly maxRetries: number;
+  readonly timeoutMs: number;
+  readonly workingDirectory: string;
+}
 
-const logger = createLogger({
-    level: 'info',
-    format: format.combine(
-        format.colorize(),
-        format.simple()
-    ),
-    transports: [
-        transport,
-        new transports.Console()
-    ],
-});
+const DEFAULT_CONFIG: AppConfig = {
+  maxRetries: 3,
+  timeoutMs: 5000,
+  workingDirectory: './data',
+};
 
-export default logger;
+/**
+ * Safely loads and validates configuration from a JSON file.
+ * Handles edge cases like missing files, permission errors, and invalid JSON.
+ */
+export function loadConfig(filePath?: string): AppConfig {
+  if (!filePath) {
+    return DEFAULT_CONFIG;
+  }
+
+  const resolvedPath = path.resolve(filePath);
+
+  try {
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`Configuration file not found at: ${resolvedPath}`);
+    }
+
+    const fileContent = fs.readFileSync(resolvedPath, 'utf-8');
+    const parsed = JSON.parse(fileContent);
+
+    return {
+      maxRetries: typeof parsed.maxRetries === 'number' ? parsed.maxRetries : DEFAULT_CONFIG.maxRetries,
+      timeoutMs: typeof parsed.timeoutMs === 'number' ? parsed.timeoutMs : DEFAULT_CONFIG.timeoutMs,
+      workingDirectory: typeof parsed.workingDirectory === 'string' ? parsed.workingDirectory : DEFAULT_CONFIG.workingDirectory,
+    };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn(`[Config] Failed to load from ${resolvedPath}. Falling back to defaults. Reason: ${errorMessage}`);
+    return DEFAULT_CONFIG;
+  }
+}
