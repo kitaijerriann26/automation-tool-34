@@ -1,66 +1,65 @@
-/**
- * Represents an automation task in the tool
- */
-export interface Task {
-  id: string;
-  name: string;
-  type: 'file' | 'api' | 'script';
-  parameters: Record<string, unknown>;
-  retries?: number;
+export interface ErrorDetails {
+  timestamp: Date;
+  context: string;
+  input?: any;
 }
 
-/**
- * Outcome of a task execution
- */
-export interface TaskResult {
-  taskId: string;
-  success: boolean;
-  output: string;
-  duration: number;
-}
-
-/**
- * Config options for running automations
- */
-export interface AutomationConfig {
-  maxConcurrent: number;
-  timeout: number;
-  logLevel: 'info' | 'debug' | 'error';
-}
-
-/**
- * Runs automation tasks and collects results
- * @param tasks list of tasks
- * @param config optional config
- * @returns promise of task results
- */
-export async function runAutomation(
-  tasks: Task[],
-  config: AutomationConfig = { maxConcurrent: 5, timeout: 30000, logLevel: 'info' }
-): Promise<TaskResult[]> {
-  const results: TaskResult[] = [];
-  for (const task of tasks) {
-    const startTime: number = Date.now();
-    let success: boolean = true;
-    let output: string = '';
-    try {
-      if (task.type === 'file') {
-        output = `Processed file: ${task.name}`;
-      } else if (task.type === 'api') {
-        output = `API request completed`;
-      } else if (task.type === 'script') {
-        output = `Script ran successfully`;
-      } else {
-        success = false;
-        output = 'Invalid type';
-      }
-      await new Promise<void>(resolve => setTimeout(resolve, 10));
-    } catch (err: unknown) {
-      success = false;
-      output = err instanceof Error ? err.message : String(err);
-    }
-    const duration: number = Date.now() - startTime;
-    results.push({ taskId: task.id, success, output, duration });
+export class AutomationError extends Error {
+  public readonly code: string;
+  public readonly details: ErrorDetails;
+  constructor(message: string, code: string, context: string, input?: any) {
+    super(message);
+    this.name = this.constructor.name;
+    this.code = code;
+    this.details = {
+      timestamp: new Date(),
+      context,
+      input,
+    };
   }
-  return results;
+}
+
+export class EdgeCaseError extends AutomationError {
+  constructor(message: string, context: string, input?: any) {
+    super(message, 'EDGE_CASE', context, input);
+  }
+}
+
+export class InvalidInputError extends AutomationError {
+  constructor(message: string, context: string, input?: any) {
+    super(message, 'INVALID_INPUT', context, input);
+  }
+}
+
+export function safeExecute<T>(
+  fn: () => T,
+  context: string,
+  defaultValue: T
+): T {
+  try {
+    return fn();
+  } catch (error: unknown) {
+    if (error instanceof AutomationError) {
+      console.error(`Automation error in ${context}: ${error.message}`, error.details);
+    } else if (error instanceof Error) {
+      console.error(`Unexpected error in ${context}: ${error.message}`);
+    } else {
+      console.error(`Unknown error in ${context}`);
+    }
+    return defaultValue;
+  }
+}
+
+export function isAutomationError(error: unknown): error is AutomationError {
+  return error instanceof AutomationError;
+}
+
+export function handleDivisionEdgeCase(a: number, b: number): number {
+  if (b === 0) {
+    throw new EdgeCaseError('Division by zero encountered', 'division operation', { a, b });
+  }
+  if (isNaN(a) || isNaN(b)) {
+    throw new InvalidInputError('Invalid numeric input', 'division operation', { a, b });
+  }
+  return a / b;
 }
