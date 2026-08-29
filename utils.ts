@@ -1,66 +1,50 @@
-export interface DataOptions {
-  maxDepth?: number;
-  sanitize?: boolean;
+export interface RetryOptions {
+  maxRetries: number;
+  baseDelay: number;
+  maxDelay?: number;
 }
 
 /**
- * Recursively processes data for general handling tasks.
- * Supports objects, arrays, and primitives.
+ * Retries a network operation with exponential backoff
+ * @param operation - The async function to retry
+ * @param options - Retry configuration
  */
-export function handleData<T>(
-  data: T,
-  options: DataOptions = {}
-): T {
-  const { maxDepth = 5, sanitize = false } = options;
-  return processRecursive(data, maxDepth, sanitize);
-}
-
-function processRecursive(
-  item: any,
-  depth: number,
-  sanitize: boolean
-): any {
-  if (depth <= 0 || item === null || item === undefined) {
-    return item;
-  }
-  if (typeof item !== 'object') {
-    if (sanitize && typeof item === 'string') {
-      return item.trim();
-    }
-    return item;
-  }
-  if (Array.isArray(item)) {
-    return item.map((elem) => processRecursive(elem, depth - 1, sanitize));
-  }
-  const result: { [key: string]: any } = {};
-  for (const key of Object.keys(item)) {
-    result[key] = processRecursive(item[key], depth - 1, sanitize);
-  }
-  return result;
-}
-
-/**
- * Merges two data objects deeply for general use.
- */
-export function mergeData<T extends object, U extends object>(
-  base: T,
-  override: U
-): T & U {
-  const result = handleData(base) as T & U;
-  const overrideProcessed = handleData(override);
-  for (const key of Object.keys(overrideProcessed)) {
-    if (
-      typeof overrideProcessed[key] === 'object' &&
-      overrideProcessed[key] !== null &&
-      !Array.isArray(overrideProcessed[key])
-    ) {
-      (result as any)[key] = mergeData(
-        (result as any)[key] || {},
-        overrideProcessed[key]
+export async function retryOperation<T>(
+  operation: () => Promise<T>,
+  options: Partial<RetryOptions> = {}
+): Promise<T> {
+  const { maxRetries = 3, baseDelay = 1000, maxDelay = 30000 } = options;
+  let attempt = 0;
+  let lastError: Error | undefined;
+  while (attempt <= maxRetries) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      attempt++;
+      if (attempt > maxRetries) {
+        break;
+      }
+      // Exponential backoff calculation
+      const delay = Math.min(
+        baseDelay * Math.pow(2, attempt),
+        maxDelay
       );
-    } else {
-      (result as any)[key] = overrideProcessed[key];
+      // Wait for the delay
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
-  return result;
+  throw lastError;
+}
+
+// Additional helper for specific network retries
+export async function retryFetch(
+  url: string,
+  init?: RequestInit,
+  options: Partial<RetryOptions> = {}
+): Promise<Response> {
+  return retryOperation(
+    () => fetch(url, init),
+    options
+  );
 }
