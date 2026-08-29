@@ -1,79 +1,66 @@
-export type ErrorCode =
-  | 'INVALID_INPUT'
-  | 'TIMEOUT'
-  | 'NETWORK_FAILURE'
-  | 'RESOURCE_LIMIT'
-  | 'UNEXPECTED_STATE';
-export interface ErrorDetails {
-  timestamp: Date;
-  context: string;
-  data?: Record<string, unknown>;
+/**
+ * Represents an automation task in the tool
+ */
+export interface Task {
+  id: string;
+  name: string;
+  type: 'file' | 'api' | 'script';
+  parameters: Record<string, unknown>;
+  retries?: number;
 }
-export interface AutomationError extends Error {
-  code: ErrorCode;
-  details: ErrorDetails;
+
+/**
+ * Outcome of a task execution
+ */
+export interface TaskResult {
+  taskId: string;
+  success: boolean;
+  output: string;
+  duration: number;
 }
-export class CustomError extends Error implements AutomationError {
-  code: ErrorCode;
-  details: ErrorDetails;
-  constructor(
-    code: ErrorCode,
-    message: string,
-    context: string,
-    data?: Record<string, unknown>
-  ) {
-    super(message);
-    this.name = 'CustomError';
-    this.code = code;
-    this.details = {
-      timestamp: new Date(),
-      context,
-      data,
-    };
-  }
+
+/**
+ * Config options for running automations
+ */
+export interface AutomationConfig {
+  maxConcurrent: number;
+  timeout: number;
+  logLevel: 'info' | 'debug' | 'error';
 }
-export function handleAutomationError(error: unknown, context: string = 'general'): string {
-  if (error instanceof CustomError) {
-    // Log the error with code and details
-    console.error(
-      `[${error.code}] ${error.message} - Context: ${error.details.context}`
-    );
-    // Handle specific edge cases
-    switch (error.code) {
-      case 'TIMEOUT':
-        return 'retry_with_backoff';
-      case 'NETWORK_FAILURE':
-        return 'retry';
-      case 'INVALID_INPUT':
-        return 'abort';
-      default:
-        return 'fail';
+
+/**
+ * Runs automation tasks and collects results
+ * @param tasks list of tasks
+ * @param config optional config
+ * @returns promise of task results
+ */
+export async function runAutomation(
+  tasks: Task[],
+  config: AutomationConfig = { maxConcurrent: 5, timeout: 30000, logLevel: 'info' }
+): Promise<TaskResult[]> {
+  const results: TaskResult[] = [];
+  for (const task of tasks) {
+    const startTime: number = Date.now();
+    let success: boolean = true;
+    let output: string = '';
+    try {
+      if (task.type === 'file') {
+        output = `Processed file: ${task.name}`;
+      } else if (task.type === 'api') {
+        output = `API request completed`;
+      } else if (task.type === 'script') {
+        output = `Script ran successfully`;
+      } else {
+        success = false;
+        output = 'Invalid type';
+      }
+      await new Promise<void>(resolve => setTimeout(resolve, 10));
+    } catch (err: unknown) {
+      success = false;
+      output = err instanceof Error ? err.message : String(err);
     }
-  } else if (error instanceof Error) {
-    console.error(`Unexpected error in ${context}: ${error.message}`);
-    return 'fail';
-  } else if (typeof error === 'string') {
-    console.error(`String error in ${context}: ${error}`);
-    return 'fail';
-  } else {
-    // Edge case for non-standard error types
-    console.error(`Unknown error in ${context}: ${JSON.stringify(error)}`);
-    return 'fail';
+    const duration: number = Date.now() - startTime;
+    results.push({ taskId: task.id, success, output, duration });
   }
-}
-export function safeProcess(input: unknown): { success: boolean; result?: string; error?: string } {
-  try {
-    if (input == null) {
-      throw new CustomError('INVALID_INPUT', 'Input cannot be null or undefined', 'safeProcess');
-    }
-    if (typeof input === 'object' && input !== null && 'id' in input && typeof (input as any).id !== 'string') {
-      throw new CustomError('INVALID_INPUT', 'Task ID must be string', 'safeProcess', { input });
-    }
-    // Simulate processing
-    const result = `Processed: ${JSON.stringify(input)}`;
-    return { success: true, result };
-  } catch (err) {
-    const action = handleAutomationError(err, 'safeProcess');
-    return { success: false, error: action };
-  }
+  return results;
 }
