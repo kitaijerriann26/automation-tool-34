@@ -1,50 +1,66 @@
-export interface RetryOptions {
-  maxRetries: number;
-  baseDelay: number;
-  maxDelay?: number;
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Retries a network operation with exponential backoff
- * @param operation - The async function to retry
- * @param options - Retry configuration
- */
+// Retry an async operation with exponential backoff
 export async function retryOperation<T>(
-  operation: () => Promise<T>,
-  options: Partial<RetryOptions> = {}
+  fn: () => Promise<T>,
+  maxAttempts: number = 3,
+  baseDelay: number = 500
 ): Promise<T> {
-  const { maxRetries = 3, baseDelay = 1000, maxDelay = 30000 } = options;
   let attempt = 0;
-  let lastError: Error | undefined;
-  while (attempt <= maxRetries) {
+  let lastError: unknown;
+  while (attempt < maxAttempts) {
     try {
-      return await operation();
+      return await fn();
     } catch (error) {
-      lastError = error as Error;
+      lastError = error;
       attempt++;
-      if (attempt > maxRetries) {
-        break;
+      if (attempt < maxAttempts) {
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        await sleep(delay);
       }
-      // Exponential backoff calculation
-      const delay = Math.min(
-        baseDelay * Math.pow(2, attempt),
-        maxDelay
-      );
-      // Wait for the delay
-      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
   throw lastError;
 }
 
-// Additional helper for specific network retries
-export async function retryFetch(
-  url: string,
-  init?: RequestInit,
-  options: Partial<RetryOptions> = {}
-): Promise<Response> {
-  return retryOperation(
-    () => fetch(url, init),
-    options
-  );
+export function logMessage(message: string, level: string = 'info'): void {
+  const timestamp = new Date().toISOString();
+  const prefix = level.toUpperCase();
+  console.log(`[${prefix}] ${timestamp}: ${message}`);
+}
+
+export function createBatchProcessor<T, R>(
+  processor: (item: T) => Promise<R>,
+  batchSize: number = 10
+) {
+  return async (items: T[]): Promise<R[]> => {
+    const results: R[] = [];
+    for (let i = 0; i < items.length; i += batchSize) {
+      const batch = items.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(item => processor(item))
+      );
+      results.push(...batchResults);
+    }
+    return results;
+  };
+}
+
+export function validateConfig(config: Record<string, unknown>): boolean {
+  if (!config || typeof config !== 'object') {
+    return false;
+  }
+  const requiredKeys = ['timeout', 'retries'];
+  return requiredKeys.every(key => key in config);
+}
+
+export function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
 }
