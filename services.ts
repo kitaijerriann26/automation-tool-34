@@ -1,79 +1,49 @@
-import * as fs from 'fs';
-import * as path from 'path';
-
-interface LogOptions {
-  logDir?: string;
-  maxSizeMB?: number;
-  logLevel?: string;
+interface InputData {
+  id: string;
+  amount: number;
+  description: string;
 }
 
-export class LoggerService {
-  private readonly logFilePath: string;
-  private readonly maxSize: number;
-  private currentLevel: string;
-
-  constructor(options: LogOptions = {}) {
-    const logDir = options.logDir || './logs';
-    this.maxSize = (options.maxSizeMB || 5) * 1024 * 1024;
-    this.currentLevel = options.logLevel || 'info';
-
-    // Create logs directory if it does not exist
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
-    this.logFilePath = path.join(logDir, 'automation.log');
-  }
-
-  private shouldRotate(): boolean {
-    if (!fs.existsSync(this.logFilePath)) {
+class ProcessingService {
+  private validateInput(input: InputData): boolean {
+    if (!input || typeof input !== 'object') {
+      console.warn('Validation failed: Input must be an object');
       return false;
     }
-    const stats = fs.statSync(this.logFilePath);
-    return stats.size > this.maxSize;
-  }
-
-  private rotateLog(): void {
-    if (!fs.existsSync(this.logFilePath)) {
-      return;
+    if (!input.id || typeof input.id !== 'string' || input.id.length < 5) {
+      console.warn('Validation failed: ID must be string with at least 5 characters');
+      return false;
     }
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '');
-    const dir = path.dirname(this.logFilePath);
-    const ext = path.extname(this.logFilePath);
-    const base = path.basename(this.logFilePath, ext);
-    const rotatedPath = path.join(dir, `${base}-${timestamp}${ext}`);
-
-    // Perform log rotation by renaming current file with timestamp
-    fs.renameSync(this.logFilePath, rotatedPath);
-  }
-
-  private writeLog(level: string, message: string): void {
-    if (this.shouldRotate()) {
-      this.rotateLog();
+    if (typeof input.amount !== 'number' || input.amount <= 0 || isNaN(input.amount)) {
+      console.warn('Validation failed: Amount must be positive number');
+      return false;
     }
+    if (!input.description || typeof input.description !== 'string' || input.description.trim().length === 0) {
+      console.warn('Validation failed: Description must be non-empty string');
+      return false;
+    }
+    return true;
+  }
+  private processValidInput(input: InputData): void {
+    const processedValue = input.amount * 1.05;
     const timestamp = new Date().toISOString();
-    const logLine = `${timestamp} [${level.toUpperCase()}] ${message}\n`;
-    fs.appendFileSync(this.logFilePath, logLine, 'utf8');
+    console.log(`[${timestamp}] Processed ${input.id}: ${input.description} (amount: ${input.amount}) -> ${processedValue}`);
   }
-
-  info(message: string): void {
-    if (this.currentLevel === 'info' || this.currentLevel === 'debug') {
-      this.writeLog('info', message);
+  public mainProcessingLoop(inputs: InputData[]): void {
+    console.log('Starting main processing loop');
+    let processedCount = 0;
+    let invalidCount = 0;
+    for (const input of inputs) {
+      if (this.validateInput(input)) {
+        this.processValidInput(input);
+        processedCount++;
+      } else {
+        invalidCount++;
+      }
     }
-  }
-
-  warn(message: string): void {
-    if (['info', 'warn', 'debug'].includes(this.currentLevel)) {
-      this.writeLog('warn', message);
-    }
-  }
-
-  error(message: string): void {
-    this.writeLog('error', message);
-  }
-
-  debug(message: string): void {
-    if (this.currentLevel === 'debug') {
-      this.writeLog('debug', message);
-    }
+    console.log(`Main loop finished. Total processed: ${processedCount}, invalid skipped: ${invalidCount}`);
   }
 }
+
+
+export { ProcessingService, InputData };
