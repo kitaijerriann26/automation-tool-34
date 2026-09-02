@@ -1,65 +1,54 @@
-export interface ErrorDetails {
-  timestamp: Date;
-  context: string;
-  input?: any;
+export interface AutomationTask {
+  id: number;
+  name: string;
+  description?: string;
+  priority: 'low' | 'medium' | 'high';
+  enabled: boolean;
 }
 
-export class AutomationError extends Error {
-  public readonly code: string;
-  public readonly details: ErrorDetails;
-  constructor(message: string, code: string, context: string, input?: any) {
-    super(message);
-    this.name = this.constructor.name;
-    this.code = code;
-    this.details = {
-      timestamp: new Date(),
-      context,
-      input,
-    };
-  }
+/**
+ * Configuration for automation tool
+ */
+export interface ToolConfig {
+  maxRetries: number;
+  timeout: number;
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  tasks: AutomationTask[];
 }
 
-export class EdgeCaseError extends AutomationError {
-  constructor(message: string, context: string, input?: any) {
-    super(message, 'EDGE_CASE', context, input);
-  }
+export interface TaskResult {
+  taskId: number;
+  success: boolean;
+  message: string;
+  duration: number;
 }
 
-export class InvalidInputError extends AutomationError {
-  constructor(message: string, context: string, input?: any) {
-    super(message, 'INVALID_INPUT', context, input);
-  }
-}
-
-export function safeExecute<T>(
-  fn: () => T,
-  context: string,
-  defaultValue: T
-): T {
-  try {
-    return fn();
-  } catch (error: unknown) {
-    if (error instanceof AutomationError) {
-      console.error(`Automation error in ${context}: ${error.message}`, error.details);
-    } else if (error instanceof Error) {
-      console.error(`Unexpected error in ${context}: ${error.message}`);
-    } else {
-      console.error(`Unknown error in ${context}`);
+/**
+ * Run enabled tasks from config
+ * @param config tool config
+ * @returns array of results
+ */
+export async function executeTasks(config: ToolConfig): Promise<TaskResult[]> {
+  const results: TaskResult[] = [];
+  for (const task of config.tasks) {
+    if (!task.enabled) continue;
+    const startTime = Date.now();
+    try {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      results.push({ taskId: task.id, success: true, message: `Task ${task.name} done`, duration: Date.now() - startTime });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : 'error';
+      results.push({ taskId: task.id, success: false, message: errMsg, duration: Date.now() - startTime });
     }
-    return defaultValue;
   }
+  return results;
 }
 
-export function isAutomationError(error: unknown): error is AutomationError {
-  return error instanceof AutomationError;
-}
-
-export function handleDivisionEdgeCase(a: number, b: number): number {
-  if (b === 0) {
-    throw new EdgeCaseError('Division by zero encountered', 'division operation', { a, b });
-  }
-  if (isNaN(a) || isNaN(b)) {
-    throw new InvalidInputError('Invalid numeric input', 'division operation', { a, b });
-  }
-  return a / b;
+/**
+ * Validate tool config
+ * @param config the config
+ * @returns true if valid
+ */
+export function isValidConfig(config: ToolConfig): boolean {
+  return config.maxRetries >= 0 && config.timeout >= 100 && config.tasks.length > 0;
 }
