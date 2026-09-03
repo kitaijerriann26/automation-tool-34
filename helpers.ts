@@ -1,52 +1,55 @@
-/**
- * Core performance optimization helpers for automation-tool-34.
- * Provides memoization and batch processing utilities.
- */
+export type Primitive = string | number | boolean | null | undefined;
 
-export interface CacheItem<T> {
-  value: T;
-  timestamp: number;
+export interface FlatObject {
+  [key: string]: Primitive;
 }
 
 /**
- * Memoizes synchronous functions to prevent redundant heavy computations.
+ * Flattens a nested object into a single-level object with dot-notated keys.
  */
-export function memoize<TArgs extends readonly unknown[], TResult>(
-  fn: (...args: TArgs) => TResult,
-  ttlMs: number = 60000
-): (...args: TArgs) => TResult {
-  const cache = new Map<string, CacheItem<TResult>>();
+export function flattenObject(obj: Record<string, any>, prefix = ''): FlatObject {
+  const result: FlatObject = {};
 
-  return (...args: TArgs): TResult => {
-    const key = JSON.stringify(args);
-    const now = Date.now();
-    const cached = cache.get(key);
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      const newKey = prefix ? `${prefix}.${key}` : key;
 
-    if (cached && now - cached.timestamp < ttlMs) {
-      return cached.value;
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        Object.assign(result, flattenObject(value, newKey));
+      } else {
+        result[newKey] = value as Primitive;
+      }
     }
-
-    const result = fn(...args);
-    cache.set(key, { value: result, timestamp: now });
-    return result;
-  };
-}
-
-/**
- * Processes an array of items in optimized concurrency batches.
- */
-export async function batchProcess<T, R>(
-  items: T[],
-  processor: (item: T) => Promise<R>,
-  batchSize: number = 10
-): Promise<R[]> {
-  const results: R[] = [];
-  
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const batchResults = await Promise.all(batch.map(processor));
-    results.push(...batchResults);
   }
 
-  return results;
+  return result;
+}
+
+/**
+ * Unflattens a dot-notated flat object back into a nested structure.
+ */
+export function unflattenObject(flatObj: FlatObject): Record<string, any> {
+  const result: Record<string, any> = {};
+
+  for (const key in flatObj) {
+    if (Object.prototype.hasOwnProperty.call(flatObj, key)) {
+      const parts = key.split('.');
+      let current = result;
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (i === parts.length - 1) {
+          current[part] = flatObj[key];
+        } else {
+          if (!(part in current) || typeof current[part] !== 'object' || current[part] === null) {
+            current[part] = {};
+          }
+          current = current[part];
+        }
+      }
+    }
+  }
+
+  return result;
 }
