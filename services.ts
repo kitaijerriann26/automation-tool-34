@@ -1,59 +1,70 @@
-interface Config {
-  apiUrl: string;
-  timeout: number;
-  maxRetries: number;
-  logLevel: string;
+import * as fs from 'fs';
+import * as path from 'path';
+
+export interface LoggerConfig {
+  logDir: string;
+  maxFileSize: number; // in bytes
+  maxFiles: number;
 }
 
-const DEFAULT_CONFIG: Config = {
-  apiUrl: "https://api.example.com",
-  timeout: 5000,
-  maxRetries: 3,
-  logLevel: "info"
-};
+export class RotatingLogger {
+  private logDir: string;
+  private logFilePath: string;
+  private maxFileSize: number;
+  private maxFiles: number;
 
-export class ConfigLoader {
-  private config: Config;
-  constructor(overrides: Partial<Config> = {}) {
-    // Start with defaults and apply any initial overrides
-    this.config = { ...DEFAULT_CONFIG, ...overrides };
-  }
+  constructor(config: LoggerConfig) {
+    this.logDir = config.logDir;
+    this.logFilePath = path.join(this.logDir, 'app.log');
+    this.maxFileSize = config.maxFileSize;
+    this.maxFiles = config.maxFiles;
 
-  getConfig(): Config {
-    return { ...this.config };
-  }
-
-  loadWithOverrides(overrides: Partial<Config>): Config {
-    // Merge current config with new overrides
-    this.config = { ...this.config, ...overrides };
-    return this.getConfig();
-  }
-
-  loadFromEnv(): Config {
-    const env: Partial<Config> = {};
-    // Load from environment variables if present
-    if (process.env.API_URL) {
-      env.apiUrl = process.env.API_URL;
+    if (!fs.existsSync(this.logDir)) {
+      fs.mkdirSync(this.logDir, { recursive: true });
     }
-    if (process.env.TIMEOUT) {
-      const t = parseInt(process.env.TIMEOUT, 10);
-      if (!isNaN(t) && t > 0) {
-        env.timeout = t;
+  }
+
+  private formatMessage(level: string, message: string): string {
+    const timestamp = new Date().toISOString();
+    return `[${timestamp}] [${level.toUpperCase()}]: ${message}\n`;
+  }
+
+  private rotate(): void {
+    for (let i = this.maxFiles - 1; i >= 1; i--) {
+      const oldPath = path.join(this.logDir, `app.${i}.log`);
+      const newPath = path.join(this.logDir, `app.${i + 1}.log`);
+      if (fs.existsSync(oldPath)) {
+        fs.renameSync(oldPath, newPath);
       }
     }
-    if (process.env.MAX_RETRIES) {
-      const r = parseInt(process.env.MAX_RETRIES, 10);
-      if (!isNaN(r) && r >= 0) {
-        env.maxRetries = r;
+    if (fs.existsSync(this.logFilePath)) {
+      fs.renameSync(this.logFilePath, path.join(this.logDir, 'app.1.log'));
+    }
+  }
+
+  private write(level: string, message: string): void {
+    const formatted = this.formatMessage(level, message);
+
+    if (fs.existsSync(this.logFilePath)) {
+      const stats = fs.statSync(this.logFilePath);
+      if (stats.size + Buffer.byteLength(formatted) > this.maxFileSize) {
+        this.rotate();
       }
     }
-    if (process.env.LOG_LEVEL) {
-      env.logLevel = process.env.LOG_LEVEL;
-    }
-    return this.loadWithOverrides(env);
-  }
-}
 
-export function createConfigLoader(initial?: Partial<Config>): ConfigLoader {
-  return new ConfigLoader(initial);
+    fs.appendFileSync(this.logFilePath, formatted, 'utf8');
+    console.log(formatted.trim());
+  }
+
+  public info(message: string): void {
+    this.write('INFO', message);
+  }
+
+  public warn(message: string): void {
+    this.write('WARN', message);
+  }
+
+  public error(message: string): void {
+    this.write('ERROR', message);
+  }
 }
