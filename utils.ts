@@ -1,52 +1,52 @@
-export interface RetryOptions {
-  maxRetries?: number;
-  initialDelayMs?: number;
-  maxDelayMs?: number;
-  backoffMultiplier?: number;
+/**
+ * Utility function to perform a deep merge of two objects.
+ * Useful for combining default options with user configurations.
+ */
+
+interface MergeOptions {
+  concatArrays?: boolean;
 }
 
-// Performs a network operation with retry logic using exponential backoff
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  options: RetryOptions = {}
-): Promise<T> {
-  const maxRetries = options.maxRetries ?? 3;
-  const initialDelayMs = options.initialDelayMs ?? 1000;
-  const maxDelayMs = options.maxDelayMs ?? 30000;
-  const backoffMultiplier = options.backoffMultiplier ?? 2;
-  let currentDelay = initialDelayMs;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (attempt === maxRetries) {
-        throw err;
+type GenericObject = Record<string, any>;
+
+/**
+ * Helper to identify if an item is a plain object.
+ */
+function isObject(item: any): item is GenericObject {
+  return !!item && typeof item === 'object' && !Array.isArray(item);
+}
+
+/**
+ * Recursively merges source object into target object.
+ * Returns a new merged object without mutating the originals.
+ */
+export function deepMerge(
+  target: GenericObject,
+  source: GenericObject,
+  options: MergeOptions = { concatArrays: false }
+): GenericObject {
+  const output = { ...target };
+
+  if (isObject(target) && isObject(source)) {
+    Object.keys(source).forEach((key) => {
+      const sourceValue = source[key];
+      const targetValue = target[key];
+
+      if (isObject(sourceValue)) {
+        if (key in target) {
+          output[key] = deepMerge(targetValue, sourceValue, options);
+        } else {
+          output[key] = { ...sourceValue };
+        }
+      } else if (Array.isArray(sourceValue) && Array.isArray(targetValue)) {
+        output[key] = options.concatArrays
+          ? [...targetValue, ...sourceValue]
+          : [...sourceValue];
+      } else if (sourceValue !== undefined) {
+        output[key] = sourceValue;
       }
-      // Apply delay before next retry
-      await new Promise((resolve) => setTimeout(resolve, currentDelay));
-      // Exponential backoff
-      currentDelay = Math.min(
-        currentDelay * backoffMultiplier,
-        maxDelayMs
-      );
-    }
+    });
   }
-  // This should never be reached
-  throw new Error("Unexpected end of retry loop");
-}
 
-// Wraps the fetch API with retry capability
-// Retries on server errors (5xx)
-export async function fetchWithRetry(
-  url: string,
-  init?: RequestInit,
-  retryOpts?: RetryOptions
-): Promise<Response> {
-  return withRetry(async () => {
-    const response = await fetch(url, init);
-    if (response.status >= 500) {
-      throw new Error(`HTTP ${response.status} error`);
-    }
-    return response;
-  }, retryOpts);
+  return output;
 }
