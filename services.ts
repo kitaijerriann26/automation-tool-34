@@ -1,51 +1,33 @@
-import { EventEmitter } from 'events';
-
-interface Task {
-  id: string;
-  execute: () => Promise<void>;
-}
+import * as winston from 'winston';
+import 'winston-daily-rotate-file';
+import * as path from 'path';
 
 /**
- * Optimized task processor with concurrency limit and cache
+ * Logger setup for automation-tool-34 with daily rotation.
+ * Keeps logs for 14 days and handles file size limits.
  */
-export class TaskProcessor extends EventEmitter {
-  private queue: Task[] = [];
-  private activeCount = 0;
-  private cache = new Map<string, any>();
+export const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(winston.format.colorize(), winston.format.simple())
+    }),
+    new winston.transports.DailyRotateFile({
+      dirname: path.join(__dirname, '../logs'),
+      filename: 'app-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxSize: '20m',
+      maxFiles: '14d'
+    })
+  ]
+});
 
-  constructor(private concurrencyLimit: number = 3) {
-    super();
-  }
-
-  public addTask(task: Task): void {
-    this.queue.push(task);
-    this.process();
-  }
-
-  private async process(): Promise<void> {
-    if (this.activeCount >= this.concurrencyLimit || this.queue.length === 0) {
-      return;
-    }
-
-    const task = this.queue.shift()!;
-    this.activeCount++;
-
-    try {
-      if (this.cache.has(task.id)) {
-        return;
-      }
-
-      await task.execute();
-      this.cache.set(task.id, true);
-    } catch (err) {
-      this.emit('error', err);
-    } finally {
-      this.activeCount--;
-      this.process();
-    }
-  }
-
-  public clearCache(): void {
-    this.cache.clear();
-  }
-}
+// Error boundary for unhandled exceptions
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err);
+  process.exit(1);
+});
