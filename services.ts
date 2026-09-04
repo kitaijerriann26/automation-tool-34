@@ -1,64 +1,51 @@
-export interface ServiceConfig {
-  maxRetries: number;
-  backoffMs: number;
+import { EventEmitter } from 'events';
+
+interface Task {
+  id: string;
+  execute: () => Promise<void>;
 }
 
-export interface TaskResult<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
+/**
+ * Optimized task processor with concurrency limit and cache
+ */
+export class TaskProcessor extends EventEmitter {
+  private queue: Task[] = [];
+  private activeCount = 0;
+  private cache = new Map<string, any>();
 
-export class TaskExecutionService {
-  private config: ServiceConfig;
-
-  constructor(config: Partial<ServiceConfig> = {}) {
-    this.config = {
-      maxRetries: config.maxRetries ?? 3,
-      backoffMs: config.backoffMs ?? 1000,
-    };
+  constructor(private concurrencyLimit: number = 3) {
+    super();
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  public addTask(task: Task): void {
+    this.queue.push(task);
+    this.process();
   }
 
-  /**
-   * Executes a task with automatic retries, exponential backoff,
-   * and fast-failing for non-recoverable error edge cases.
-   */
-  public async executeWithRetry<T>(
-    task: () => Promise<T>,
-    context: string = "generic-task"
-  ): Promise<TaskResult<T>> {
-    let attempt = 0;
-
-    while (attempt < this.config.maxRetries) {
-      try {
-        const data = await task();
-        return { success: true, data };
-      } catch (error: any) {
-        attempt++;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        // Fail fast on specific edge cases where retry is redundant
-        if (errorMessage.includes("Unauthorized") || errorMessage.includes("Validation failed")) {
-          return { success: false, error: `Fatal non-retryable error in ${context}: ${errorMessage}` };
-        }
-
-        if (attempt >= this.config.maxRetries) {
-          return {
-            success: false,
-            error: `Task execution failed after ${attempt} attempts in ${context}: ${errorMessage}`,
-          };
-        }
-
-        // Calculate exponential backoff delay
-        const backoffDelay = this.config.backoffMs * Math.pow(2, attempt - 1);
-        await this.delay(backoffDelay);
-      }
+  private async process(): Promise<void> {
+    if (this.activeCount >= this.concurrencyLimit || this.queue.length === 0) {
+      return;
     }
 
-    return { success: false, error: `Execution aborted in ${context}` };
+    const task = this.queue.shift()!;
+    this.activeCount++;
+
+    try {
+      if (this.cache.has(task.id)) {
+        return;
+      }
+
+      await task.execute();
+      this.cache.set(task.id, true);
+    } catch (err) {
+      this.emit('error', err);
+    } finally {
+      this.activeCount--;
+      this.process();
+    }
+  }
+
+  public clearCache(): void {
+    this.cache.clear();
   }
 }
