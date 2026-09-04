@@ -1,55 +1,51 @@
-export type Primitive = string | number | boolean | null | undefined;
-
-export interface FlatObject {
-  [key: string]: Primitive;
+export interface RetryOptions {
+  retries?: number;
+  delay?: number;
+  factor?: number;
+  exponential?: boolean;
+  onRetry?: (error: any, attempt: number) => void;
 }
 
 /**
- * Flattens a nested object into a single-level object with dot-notated keys.
+ * Executes an asynchronous operation and retries it if it fails.
+ * Uses optional exponential backoff to prevent overwhelming external services.
  */
-export function flattenObject(obj: Record<string, any>, prefix = ''): FlatObject {
-  const result: FlatObject = {};
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: RetryOptions = {}
+): Promise<T> {
+  const {
+    retries = 3,
+    delay = 1000,
+    factor = 2,
+    exponential = true,
+    onRetry,
+  } = options;
 
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      const value = obj[key];
-      const newKey = prefix ? `${prefix}.${key}` : key;
+  let lastError: any;
+  let currentDelay = delay;
 
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        Object.assign(result, flattenObject(value, newKey));
-      } else {
-        result[newKey] = value as Primitive;
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt > retries) {
+        break;
+      }
+
+      if (onRetry) {
+        onRetry(error, attempt);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, currentDelay));
+
+      if (exponential) {
+        currentDelay *= factor;
       }
     }
   }
 
-  return result;
-}
-
-/**
- * Unflattens a dot-notated flat object back into a nested structure.
- */
-export function unflattenObject(flatObj: FlatObject): Record<string, any> {
-  const result: Record<string, any> = {};
-
-  for (const key in flatObj) {
-    if (Object.prototype.hasOwnProperty.call(flatObj, key)) {
-      const parts = key.split('.');
-      let current = result;
-
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        if (i === parts.length - 1) {
-          current[part] = flatObj[key];
-        } else {
-          if (!(part in current) || typeof current[part] !== 'object' || current[part] === null) {
-            current[part] = {};
-          }
-          current = current[part];
-        }
-      }
-    }
-  }
-
-  return result;
+  throw lastError;
 }
