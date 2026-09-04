@@ -1,51 +1,47 @@
-export interface RetryOptions {
-  retries?: number;
-  delay?: number;
-  factor?: number;
-  exponential?: boolean;
-  onRetry?: (error: any, attempt: number) => void;
+/**
+ * Pauses execution for a given number of milliseconds.
+ */
+export function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface RetryOptions {
+  retries: number;
+  delayMs: number;
+  backoffMultiplier?: number;
 }
 
 /**
- * Executes an asynchronous operation and retries it if it fails.
- * Uses optional exponential backoff to prevent overwhelming external services.
+ * Retries an asynchronous operation with exponential backoff.
  */
-export async function withRetry<T>(
+export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
-  options: RetryOptions = {}
+  options: RetryOptions
 ): Promise<T> {
-  const {
-    retries = 3,
-    delay = 1000,
-    factor = 2,
-    exponential = true,
-    onRetry,
-  } = options;
+  const { retries, delayMs, backoffMultiplier = 2 } = options;
+  let currentAttempt = 0;
 
-  let lastError: any;
-  let currentDelay = delay;
-
-  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+  while (currentAttempt <= retries) {
     try {
       return await fn();
     } catch (error) {
-      lastError = error;
-
-      if (attempt > retries) {
-        break;
+      currentAttempt++;
+      if (currentAttempt > retries) {
+        throw new Error(`Operation failed after ${retries} attempts: ${(error as Error).message}`);
       }
-
-      if (onRetry) {
-        onRetry(error, attempt);
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, currentDelay));
-
-      if (exponential) {
-        currentDelay *= factor;
-      }
+      const waitTime = delayMs * Math.pow(backoffMultiplier, currentAttempt - 1);
+      await delay(waitTime);
     }
   }
+  throw new Error("Unreachable state in retry helper");
+}
 
-  throw lastError;
+/**
+ * Safely parses a string value into a boolean.
+ */
+export function parseBoolean(val: string | boolean | undefined): boolean {
+  if (typeof val === "boolean") return val;
+  if (!val) return false;
+  const normalized = val.trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
 }
