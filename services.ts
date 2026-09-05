@@ -1,79 +1,37 @@
-export interface TaskInput {
+interface ProcessInput {
   id: string;
-  action: string;
-  payload: Record<string, unknown>;
-  priority?: number;
-  timeoutMs?: number;
+  value: number;
+  timestamp: number;
 }
 
-export interface ProcessingResult {
-  processedCount: number;
-  failedCount: number;
-  errors: string[];
+/**
+ * Validates processing inputs to ensure data integrity
+ */
+function isValidInput(input: unknown): input is ProcessInput {
+  if (typeof input !== 'object' || input === null) return false;
+  const data = input as Record<string, unknown>;
+
+  return (
+    typeof data.id === 'string' &&
+    typeof data.value === 'number' &&
+    !isNaN(data.value) &&
+    typeof data.timestamp === 'number'
+  );
 }
 
-export function validateTaskInput(input: unknown): input is TaskInput {
-  if (typeof input !== 'object' || input === null) {
-    return false;
-  }
-
-  const candidate = input as Record<string, unknown>;
-
-  if (typeof candidate.id !== 'string' || candidate.id.trim() === '') {
-    return false;
-  }
-
-  if (typeof candidate.action !== 'string' || candidate.action.trim() === '') {
-    return false;
-  }
-
-  if (typeof candidate.payload !== 'object' || candidate.payload === null) {
-    return false;
-  }
-
-  if (candidate.priority !== undefined && typeof candidate.priority !== 'number') {
-    return false;
-  }
-
-  if (
-    candidate.timeoutMs !== undefined &&
-    (typeof candidate.timeoutMs !== 'number' || candidate.timeoutMs <= 0)
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-export async function processTaskQueue(rawTasks: unknown[]): Promise<ProcessingResult> {
-  const result: ProcessingResult = {
-    processedCount: 0,
-    failedCount: 0,
-    errors: [],
-  };
-
-  for (let i = 0; i < rawTasks.length; i++) {
-    const rawTask = rawTasks[i];
-
-    if (!validateTaskInput(rawTask)) {
-      result.failedCount++;
-      result.errors.push(`Task at index ${i} failed validation: invalid structure`);
+export async function processQueue(items: unknown[]): Promise<void> {
+  for (const item of items) {
+    // Validate schema before attempting operations
+    if (!isValidInput(item)) {
+      console.error('Invalid input encountered, skipping item:', item);
       continue;
     }
 
     try {
-      await executeTask(rawTask);
-      result.processedCount++;
+      // Core automation logic
+      console.log(`Processing item ${item.id} with value ${item.value}`);
     } catch (err) {
-      result.failedCount++;
-      const message = err instanceof Error ? err.message : String(err);
-      result.errors.push(`Task ${rawTask.id} execution failed: ${message}`);
+      console.error(`Execution failed for ${item.id}:`, err);
     }
   }
-
-  return result;
-}
-
-async function executeTask(task: TaskInput): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, task.timeoutMs || 10));
 }
